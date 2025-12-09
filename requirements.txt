@@ -1,0 +1,31 @@
+# ========================================
+# 차익거래 봇 필수 라이브러리
+# ========================================
+
+# 웹 프레임워크 (설정 서버용)
+flask>=2.0.0,<3.0.0
+
+# HTTP 클라이언트
+curl-cffi>=0.5.0
+requests>=2.28.0
+
+# 블록체인
+ostium-python-sdk>=0.1.0
+web3>=6.0.0
+eth-account>=0.8.0
+
+# WebSocket
+websocket-client>=1.0.0
+
+# 환경 변수
+python-dotenv>=0.20.0
+
+# 텔레그램 봇
+python-telegram-bot>=20.0
+
+# ========================================
+# 참고사항
+# ========================================
+# - tkinter는 Python에 기본 포함 (GUI 버전용)
+# - json, threading, time 등도 기본 포함
+# - 설치 명령: pip install -r requirements.txt
