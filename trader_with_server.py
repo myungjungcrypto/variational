@@ -345,15 +345,26 @@ class VariationalWebSocket:
             ws.send(auth_msg)
 
         self.is_running = True
+        # Cloudflare 우회를 위한 헤더 추가
+        headers = [
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Origin: https://omni.variational.io'
+        ]
+        
         self.ws = websocket.WebSocketApp(
             self.url,
             on_open=on_open,
             on_message=on_message,
             on_error=on_error,
-            on_close=on_close
+            on_close=on_close,
+            header=headers
         )
 
-        threading.Thread(target=lambda: self.ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE}), daemon=True).start()
+        threading.Thread(target=lambda: self.ws.run_forever(
+            sslopt={"cert_reqs": ssl.CERT_NONE},
+            ping_interval=20,
+            ping_timeout=10
+        ), daemon=True).start()
 
     def close(self):
         """WebSocket 연결 종료"""
@@ -431,15 +442,26 @@ class VariationalPriceWebSocket:
             ws.send(subscribe_msg)
 
         self.is_running = True
+        # Cloudflare 우회를 위한 헤더 추가
+        headers = [
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Origin: https://omni.variational.io'
+        ]
+        
         self.ws = websocket.WebSocketApp(
             self.url,
             on_open=on_open,
             on_message=on_message,
             on_error=on_error,
-            on_close=on_close
+            on_close=on_close,
+            header=headers
         )
 
-        threading.Thread(target=lambda: self.ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE}), daemon=True).start()
+        threading.Thread(target=lambda: self.ws.run_forever(
+            sslopt={"cert_reqs": ssl.CERT_NONE},
+            ping_interval=20,
+            ping_timeout=10
+        ), daemon=True).start()
 
     def close(self):
         """WebSocket 연결 종료"""
@@ -942,9 +964,12 @@ class VariationalClient:
     def get_headers(self):
         return {
             'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
             'content-type': 'application/json',
-            'vr-connected-address': self.wallet_address,
-            'referer': f'{self.base_url}/perpetual/BTC'
+            'origin': self.base_url,
+            'referer': f'{self.base_url}/perpetual/BTC',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'vr-connected-address': self.wallet_address
         }
 
     def get_balance(self):
