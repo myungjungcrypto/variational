@@ -524,11 +524,20 @@ class VariationalClient:
 
         self.session.cookies.set('vr-token', self.vr_token)
 
-        self.portfolio_ws = VariationalWebSocket(self.vr_token, self.on_portfolio_update)
-        self.portfolio_ws.connect()
+        # WebSocket 연결 시도 (실패해도 REST API로 계속 진행 가능)
+        try:
+            self.portfolio_ws = VariationalWebSocket(self.vr_token, self.on_portfolio_update)
+            self.portfolio_ws.connect()
+        except Exception as e:
+            print(f"⚠️ Portfolio WebSocket 연결 실패 (REST API로 계속): {e}")
+            self.portfolio_ws = None
 
-        self.price_ws = VariationalPriceWebSocket(self.on_price_update)
-        self.price_ws.connect()
+        try:
+            self.price_ws = VariationalPriceWebSocket(self.on_price_update)
+            self.price_ws.connect()
+        except Exception as e:
+            print(f"⚠️ Price WebSocket 연결 실패 (REST API로 계속): {e}")
+            self.price_ws = None
 
     def auto_generate_token(self):
         """🔐 토큰 자동 발급"""
