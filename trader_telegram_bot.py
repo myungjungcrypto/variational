@@ -94,10 +94,20 @@ trader_module = importlib.util.module_from_spec(spec)
 # API_CONFIG를 먼저 설정한 후 모듈 로드
 def load_trader_classes():
     """trader_with_server.py에서 클래스 로드 (API_CONFIG 설정 후)"""
-    global OstiumClient, VariationalClient, VariationalWebSocket, VariationalPriceWebSocket
-    # API_CONFIG를 trader_module에 설정
+    global OstiumClient, VariationalClient, VariationalWebSocket, VariationalPriceWebSocket, API_CONFIG
+    
+    if API_CONFIG is None:
+        raise Exception("❌ API_CONFIG가 설정되지 않았습니다! load_api_config()를 먼저 호출하세요.")
+    
+    # API_CONFIG를 모듈에 먼저 설정 (모듈 로드 전)
     trader_module.API_CONFIG = API_CONFIG
+    
+    # 모듈 실행 (이때 API_CONFIG가 이미 설정되어 있음)
     spec.loader.exec_module(trader_module)
+    
+    # 모듈 실행 후에도 API_CONFIG가 유지되도록 다시 설정
+    trader_module.API_CONFIG = API_CONFIG
+    
     OstiumClient = trader_module.OstiumClient
     VariationalClient = trader_module.VariationalClient
     VariationalWebSocket = trader_module.VariationalWebSocket
@@ -193,8 +203,7 @@ class ArbitrageTelegramBot:
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """봇 시작 명령어"""
-        welcome_text = """
-🤖 **Ostium ↔️ Variational 차익거래 봇**
+        welcome_text = """🤖 Ostium ↔️ Variational 차익거래 봇
 
 사용 가능한 명령어:
 /start - 시작 메시지
@@ -207,9 +216,8 @@ class ArbitrageTelegramBot:
 /close_all - 모든 포지션 청산
 /stats - 거래 통계
 
-봇이 자동으로 가격을 모니터링하고 차익거래 기회를 찾습니다.
-        """
-        await update.message.reply_text(welcome_text, parse_mode='Markdown')
+봇이 자동으로 가격을 모니터링하고 차익거래 기회를 찾습니다."""
+        await update.message.reply_text(welcome_text)
     
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """상태 확인"""
