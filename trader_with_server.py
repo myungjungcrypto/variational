@@ -333,7 +333,11 @@ class VariationalWebSocket:
                 print(f"WebSocket 메시지 에러: {e}")
 
         def on_error(ws, error):
-            print(f"WebSocket 에러: {error}")
+            # 403 에러는 Cloudflare 차단일 수 있음 - 경고만 표시
+            if "403" in str(error) or "Forbidden" in str(error):
+                print(f"⚠️ WebSocket 403 에러 (Cloudflare 차단 가능성) - REST API로 계속 진행")
+            else:
+                print(f"WebSocket 에러: {error}")
 
         def on_close(ws, close_status_code, close_msg):
             if self.is_running:
@@ -422,7 +426,11 @@ class VariationalPriceWebSocket:
                 print(f"Price WebSocket 메시지 에러: {e}")
 
         def on_error(ws, error):
-            print(f"Price WebSocket 에러: {error}")
+            # 403 에러는 Cloudflare 차단일 수 있음 - 경고만 표시
+            if "403" in str(error) or "Forbidden" in str(error):
+                print(f"⚠️ Price WebSocket 403 에러 (Cloudflare 차단 가능성) - REST API로 계속 진행")
+            else:
+                print(f"Price WebSocket 에러: {error}")
 
         def on_close(ws, close_status_code, close_msg):
             if self.is_running:
@@ -487,7 +495,8 @@ class VariationalClient:
 
         self.wallet_address = wallet_address
         self.private_key = private_key
-        self.session = requests.Session(impersonate="chrome124")
+        # Cloudflare 우회를 위해 최신 Chrome 버전 사용
+        self.session = requests.Session(impersonate="chrome131")
 
         if API_CONFIG is None:
             raise Exception("❌ API 설정이 로드되지 않았습니다!")
@@ -525,15 +534,23 @@ class VariationalClient:
         """🔐 토큰 자동 발급"""
         try:
             print(f"   [1/3] 서명 데이터 요청 중...")
+            # Cloudflare 우회를 위해 요청 간격 추가
+            time.sleep(1)
+            
             response = self.session.post(
                 f"{self.base_url}{self.endpoints['auth_generate_signing']}",
                 headers={
                     "accept": "*/*",
+                    "accept-language": "en-US,en;q=0.9",
                     "content-type": "application/json",
+                    "origin": self.base_url,
+                    "referer": f"{self.base_url}/perpetual/BTC",
+                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     "vr-connected-address": self.wallet_address
                 },
                 json={"address": self.wallet_address},
-                timeout=10
+                timeout=15,
+                allow_redirects=True
             )
 
             if response.status_code != 200:
@@ -931,6 +948,9 @@ class VariationalClient:
         try:
             qty_str = f"{qty:.7f}".rstrip('0').rstrip('.')
 
+            # Cloudflare 우회를 위해 요청 간격 추가
+            time.sleep(0.5)
+            
             response = self.session.post(
                 f'{self.base_url}{self.endpoints["quotes_indicative"]}',
                 json={
@@ -943,7 +963,8 @@ class VariationalClient:
                     'qty': qty_str
                 },
                 headers=self.get_headers(),
-                timeout=3
+                timeout=10,
+                allow_redirects=True
             )
 
             if response.status_code == 401:
@@ -952,7 +973,12 @@ class VariationalClient:
                     return self.get_quote(symbol, qty)
                 return None
 
-            if response.status_code != 200:
+            if response.status_code == 403:
+                print(f"⚠️ Quote 403 에러 (Cloudflare 차단) - 재시도 중...")
+                # Cloudflare 챌린지 대기
+                time.sleep(2)
+                return None
+            elif response.status_code != 200:
                 print(f"Quote 실패: {response.status_code}")
                 return None
 
