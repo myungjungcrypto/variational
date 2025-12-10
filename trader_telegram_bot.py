@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 # 텔레그램 봇 라이브러리
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 # 기존 모듈 import
 from curl_cffi import requests
@@ -151,6 +151,9 @@ class ArbitrageTelegramBot:
         self.threads = []
         self.log_queue = Queue()
         
+        # 설정 입력 대기 상태
+        self.waiting_for_setting = None  # 'entry_gap', 'target_profit', 'leverage', 'position_size'
+        
         # 텔레그램 봇 애플리케이션
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         if not self.bot_token:
@@ -175,7 +178,18 @@ class ArbitrageTelegramBot:
         self.app.add_handler(CommandHandler("positions", self.positions_command))
         self.app.add_handler(CommandHandler("close_all", self.close_all_command))
         self.app.add_handler(CommandHandler("stats", self.stats_command))
+        self.app.add_handler(CommandHandler("cancel", self.cancel_setting_command))
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
+        # 설정값 입력 핸들러 (명령어가 아닌 일반 메시지)
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_setting_input))
+    
+    async def cancel_setting_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """설정 입력 취소"""
+        if self.waiting_for_setting:
+            self.waiting_for_setting = None
+            await update.message.reply_text("✅ 설정 입력이 취소되었습니다.")
+        else:
+            await update.message.reply_text("⚠️ 설정 입력 대기 중이 아닙니다.")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """봇 시작 명령어"""
@@ -343,10 +357,79 @@ class ArbitrageTelegramBot:
                 parse_mode='Markdown'
             )
         elif query.data.startswith("set_"):
+            setting_name = query.data.replace("set_", "")
+            setting_names = {
+                "entry_gap": "진입 갭 ($)",
+                "target_profit": "목표 이익 ($)",
+                "leverage": "레버리지 (배)",
+                "position_size": "포지션 크기 (USDC)"
+            }
+            
+            self.waiting_for_setting = setting_name
             await query.edit_message_text(
-                f"💬 새 값을 입력하세요.\n\n"
-                f"예: /set_{query.data.replace('set_', '')} 25"
+                f"💬 **{setting_names.get(setting_name, setting_name)} 변경**\n\n"
+                f"새 값을 숫자로 입력하세요.\n\n"
+                f"예: `25` 또는 `25.5`\n\n"
+                f"취소하려면 `/cancel` 명령어를 사용하세요.",
+                parse_mode='Markdown'
             )
+    
+    async def handle_setting_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """설정값 입력 처리"""
+        if not self.waiting_for_setting:
+            return  # 설정 대기 중이 아니면 무시
+        
+        try:
+            text = update.message.text.strip()
+            value = float(text)
+            
+            if value <= 0:
+                await update.message.reply_text("❌ 0보다 큰 값을 입력하세요!")
+                return
+            
+            # 설정값 변경
+            if self.waiting_for_setting == "entry_gap":
+                self.entry_gap = value
+                await update.message.reply_text(
+                    f"✅ 진입 갭이 ${value}로 변경되었습니다!",
+                    parse_mode='Markdown'
+                )
+            elif self.waiting_for_setting == "target_profit":
+                self.target_profit = value
+                await update.message.reply_text(
+                    f"✅ 목표 이익이 ${value}로 변경되었습니다!",
+                    parse_mode='Markdown'
+                )
+            elif self.waiting_for_setting == "leverage":
+                if value < 1 or value > 10:
+                    await update.message.reply_text("❌ 레버리지는 1~10 사이의 값을 입력하세요!")
+                    return
+                self.leverage = value
+                await update.message.reply_text(
+                    f"✅ 레버리지가 {value}x로 변경되었습니다!",
+                    parse_mode='Markdown'
+                )
+            elif self.waiting_for_setting == "position_size":
+                self.position_size = value
+                await update.message.reply_text(
+                    f"✅ 포지션 크기가 ${value}로 변경되었습니다!",
+                    parse_mode='Markdown'
+                )
+            
+            setting_changed = self.waiting_for_setting
+            self.waiting_for_setting = None
+            self.log(f"⚙️ 설정 변경: {setting_changed} = {value}")
+            
+        except ValueError:
+            await update.message.reply_text(
+                "❌ 숫자를 입력하세요!\n\n"
+                "예: `25` 또는 `25.5`\n"
+                "취소: `/cancel`",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ 에러: {e}")
+            self.waiting_for_setting = None
     
     def log(self, message):
         """로그 출력"""

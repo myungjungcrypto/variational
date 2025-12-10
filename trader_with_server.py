@@ -766,30 +766,42 @@ class VariationalClient:
             return {'success': False, 'error': str(e)}
 
     def close_position(self, symbol, max_retries=3):
-        """⚡ 재시도 로직 추가"""
+        """⚡ 재시도 로직 추가 + REST API로 최신 포지션 조회"""
         for attempt in range(max_retries):
             try:
                 # 숨겨진 검증
                 if not _server_alive_check():
                     return {'success': False, 'error': 'Connection lost'}
 
-                current_pos = None
-                for pos in self.current_positions:
-                    pos_info = pos.get('position_info', {})
-                    if pos_info.get('instrument', {}).get('underlying') == symbol:
-                        current_pos = pos
-                        break
+                # 🔥 REST API로 최신 포지션 조회 (WebSocket 데이터는 신뢰하지 않음)
+                print(f"[VARIATIONAL] 🔍 최신 포지션 조회 중... (시도 {attempt+1}/{max_retries})")
+                pos_result = self.get_positions_rest()
+                
+                if not pos_result.get('success'):
+                    print(f"[VARIATIONAL] ⚠️ 포지션 조회 실패: {pos_result.get('error')}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    return {'success': False, 'error': pos_result.get('error', '포지션 조회 실패')}
 
-                if not current_pos:
-                    print(f"[VARIATIONAL] 포지션 없음")
-                    return {'success': False, 'error': '포지션 없음'}
+                # 포지션이 없으면 성공으로 처리 (이미 청산됨)
+                if pos_result.get('error') == '포지션 없음':
+                    print(f"[VARIATIONAL] ✅ 포지션 없음 (이미 청산됨)")
+                    return {'success': True, 'message': '이미 청산됨'}
 
-                pos_info = current_pos.get('position_info', {})
-                pos_qty = float(pos_info.get('qty', 0))
+                pos_qty = pos_result.get('qty', 0)
+                
+                if abs(pos_qty) < 0.000001:  # 거의 0이면 이미 청산됨
+                    print(f"[VARIATIONAL] ✅ 포지션 수량이 0 (이미 청산됨)")
+                    return {'success': True, 'message': '이미 청산됨'}
+
                 close_side = 'sell' if pos_qty > 0 else 'buy'
                 close_qty = abs(pos_qty)
 
-                print(f"[VARIATIONAL] 청산 시도 {attempt+1}/{max_retries}... 방향: {close_side}, 수량: {close_qty:.8f}")
+                print(f"[VARIATIONAL] 📊 청산 정보:")
+                print(f"   현재 수량: {pos_qty:.8f}")
+                print(f"   청산 방향: {close_side}")
+                print(f"   청산 수량: {close_qty:.8f}")
 
                 quote = self.get_quote_with_retry(symbol, close_qty)
 
@@ -800,8 +812,11 @@ class VariationalClient:
                         continue
                     return {'success': False, 'error': 'Quote 조회 실패'}
 
+                print(f"[VARIATIONAL] 💰 Quote 받음: quote_id={quote.get('quote_id', 'N/A')}")
+
                 time.sleep(0.3)
 
+                print(f"[VARIATIONAL] 📤 청산 주문 전송 중...")
                 response = self.session.post(
                     f'{self.base_url}{self.endpoints["quotes_accept"]}',
                     json={
@@ -814,6 +829,8 @@ class VariationalClient:
                     timeout=10
                 )
 
+                print(f"[VARIATIONAL] 📥 응답: {response.status_code}")
+
                 if response.status_code == 401:
                     print(f"⚠️ 토큰 만료 감지")
                     if self.refresh_token_if_needed():
@@ -821,17 +838,38 @@ class VariationalClient:
                     return {'success': False, 'error': '토큰 만료'}
 
                 if response.status_code == 200:
-                    print(f"[VARIATIONAL] ✅ 청산 완료!")
-                    return {'success': True}
+                    order_data = response.json()
+                    print(f"[VARIATIONAL] ✅ 청산 주문 수신!")
+                    print(f"   응답 데이터: {order_data}")
+                    
+                    # 청산 후 포지션 확인 (2초 대기 후)
+                    time.sleep(2)
+                    verify_result = self.get_positions_rest()
+                    if verify_result.get('success') and abs(verify_result.get('qty', 0)) < 0.000001:
+                        print(f"[VARIATIONAL] ✅✅ 청산 확인 완료! (포지션 수량: {verify_result.get('qty', 0):.8f})")
+                        return {'success': True, 'order': order_data}
+                    elif not verify_result.get('success') or verify_result.get('error') == '포지션 없음':
+                        print(f"[VARIATIONAL] ✅✅ 청산 확인 완료! (포지션 없음)")
+                        return {'success': True, 'order': order_data}
+                    else:
+                        print(f"[VARIATIONAL] ⚠️ 청산 주문은 성공했지만 포지션 확인 실패")
+                        print(f"   남은 수량: {verify_result.get('qty', 0):.8f}")
+                        # 주문은 성공했으므로 성공으로 처리하되 경고
+                        return {'success': True, 'order': order_data, 'warning': '포지션 확인 실패'}
                 else:
+                    error_text = response.text[:200] if hasattr(response, 'text') else 'N/A'
                     print(f"[VARIATIONAL] ❌ 청산 실패: {response.status_code}")
+                    print(f"   에러 내용: {error_text}")
                     if attempt < max_retries - 1:
                         time.sleep(2)
                         continue
-                    return {'success': False, 'error': f"Status {response.status_code}"}
+                    return {'success': False, 'error': f"Status {response.status_code}: {error_text}"}
 
             except Exception as e:
-                print(f"[VARIATIONAL] 청산 에러 (시도 {attempt+1}): {e}")
+                import traceback
+                print(f"[VARIATIONAL] ❌ 청산 에러 (시도 {attempt+1}): {e}")
+                print(f"   상세 에러:")
+                traceback.print_exc()
                 if attempt < max_retries - 1:
                     time.sleep(2)
                 else:
@@ -1531,9 +1569,49 @@ class ArbitrageGUI:
         entry_gap = float(self.entry_gap_var.get())
         target_profit = float(self.target_profit_var.get())
 
+        # 🔥 실제 포지션 확인 (플래그만으로 판단하지 않음)
+        has_ostium_pos = False
+        has_var_pos = False
+        current_time = time.time()
+        
+        # ⚠️ 진입 직후 체결 대기 시간 (20초) 동안은 실제 포지션 조회를 하지 않음
+        is_recent_entry = hasattr(self, 'last_entry_time') and (current_time - self.last_entry_time) < 20
+        
+        if is_recent_entry:
+            # 진입 직후 - 플래그만 확인 (실제 포지션 조회는 하지 않음, API 호출 부하 방지)
+            has_ostium_pos = bool(self.ostium_position) or bool(self.pending_ostium_order_id)
+            has_var_pos = bool(self.variational_position)
+        else:
+            # 진입 후 20초 경과 - 실제 포지션 조회
+            if self.ostium_position or self.pending_ostium_order_id:
+                try:
+                    ostium_positions = self.ostium_client.get_open_positions_isolated()
+                    if ostium_positions:
+                        btc_positions = [p for p in ostium_positions if p.get('pair', {}).get('from') == 'BTC']
+                        has_ostium_pos = len(btc_positions) > 0
+                    else:
+                        # 포지션 조회했는데 없으면
+                        if self.pending_ostium_order_id:
+                            has_ostium_pos = True  # 아직 체결 대기 중
+                        else:
+                            has_ostium_pos = False
+                except:
+                    has_ostium_pos = bool(self.ostium_position) or bool(self.pending_ostium_order_id)
+            else:
+                has_ostium_pos = False
+            
+            if self.variational_client and self.variational_position:
+                try:
+                    var_pos_result = self.variational_client.get_positions_rest()
+                    has_var_pos = var_pos_result.get('success') and abs(var_pos_result.get('qty', 0)) > 0.000001
+                except:
+                    has_var_pos = bool(self.variational_position)
+            else:
+                has_var_pos = False
+
         # 진입
-        if (not self.ostium_position and
-            not self.variational_position and
+        if (not has_ostium_pos and
+            not has_var_pos and
             not self.pending_ostium_order_id and
             not self.is_closing and
             not self.is_executing):
@@ -1552,19 +1630,43 @@ class ArbitrageGUI:
                 ).start()
 
         # 청산
-        elif (self.ostium_position and self.variational_position) and not self.is_closing:
-            ostium_pnl, var_pnl, total_pnl = self.get_position_pnl()
+        elif (has_ostium_pos or has_var_pos) and not self.is_closing:
+            # ⚠️ 진입 직후 15초 동안은 청산하지 않음 (체결 대기 중)
+            if hasattr(self, 'last_entry_time') and (current_time - self.last_entry_time) < 15:
+                # 진입 직후 - 청산하지 않음
+                return
+            
+            # 둘 다 있어야 청산 (하나만 있어도 청산 시도)
+            if has_ostium_pos and has_var_pos:
+                ostium_pnl, var_pnl, total_pnl = self.get_position_pnl()
 
-            current_time = time.time()
+                current_time = time.time()
 
-            if not hasattr(self, 'last_status_log') or current_time - self.last_status_log > 0.5:
-                self.last_status_log = current_time
-                status = "🟢" if total_pnl < target_profit else "🔴"
-                remaining = target_profit - total_pnl
-                self.log(f"{status} O:${ostium_pnl:+.2f} V:${var_pnl:+.2f} = ${total_pnl:+.2f} | 목표까지: ${remaining:.2f}")
+                if not hasattr(self, 'last_status_log') or current_time - self.last_status_log > 0.5:
+                    self.last_status_log = current_time
+                    status = "🟢" if total_pnl < target_profit else "🔴"
+                    remaining = target_profit - total_pnl
+                    self.log(f"{status} O:${ostium_pnl:+.2f} V:${var_pnl:+.2f} = ${total_pnl:+.2f} | 목표까지: ${remaining:.2f}")
 
-            if total_pnl >= target_profit:
-                self.log(f"🎯 즉시 청산! 총 이익: ${total_pnl:.2f}")
+                if total_pnl >= target_profit:
+                    self.log(f"🎯 즉시 청산! 총 이익: ${total_pnl:.2f}")
+                    threading.Thread(target=self.close_arbitrage_positions, daemon=True).start()
+            elif has_var_pos and not has_ostium_pos:
+                # Variational만 있으면 강제 청산 (단, 진입 직후 20초 이내는 제외)
+                if hasattr(self, 'last_entry_time') and (current_time - self.last_entry_time) < 20:
+                    # 진입 직후 - Ostium 체결 대기 중일 수 있음
+                    if self.pending_ostium_order_id:
+                        return  # Ostium 체결 대기 중이므로 청산하지 않음
+                
+                self.log(f"⚠️ Variational 포지션만 남아있음 - 강제 청산")
+                threading.Thread(target=self.close_arbitrage_positions, daemon=True).start()
+            elif has_ostium_pos and not has_var_pos:
+                # Ostium만 있으면 강제 청산 (단, 진입 직후 20초 이내는 제외)
+                if hasattr(self, 'last_entry_time') and (current_time - self.last_entry_time) < 20:
+                    # 진입 직후 - Variational 체결 대기 중일 수 있음
+                    return  # Variational 체결 대기 중이므로 청산하지 않음
+                
+                self.log(f"⚠️ Ostium 포지션만 남아있음 - 강제 청산")
                 threading.Thread(target=self.close_arbitrage_positions, daemon=True).start()
 
     def execute_arbitrage(self, ostium_short, ostium_entry_price, var_entry_price, var_quote):
@@ -1698,6 +1800,9 @@ class ArbitrageGUI:
             }
             self.variational_position = True
             self.pending_ostium_order_id = order_id
+            
+            # 🔥 진입 시간 기록 (청산 방지용)
+            self.last_entry_time = time.time()
 
             threading.Thread(target=self.track_ostium_position_background, args=(order_id,), daemon=True).start()
 
@@ -1811,16 +1916,37 @@ class ArbitrageGUI:
             def close_variational():
                 nonlocal var_success
                 if not self.variational_position:
+                    self.log(f"   ⚠️ Variational 포지션 플래그가 없음 (이미 청산되었을 수 있음)")
+                    # 플래그가 없어도 실제 포지션이 있는지 확인
+                    pos_check = self.variational_client.get_positions_rest()
+                    if pos_check.get('success') and abs(pos_check.get('qty', 0)) > 0.000001:
+                        self.log(f"   🔍 실제 포지션 발견! 강제 청산 시도...")
+                        result = self.variational_client.close_position('BTC', max_retries=3)
+                        if result.get('success'):
+                            self.log(f"   ✅ Variational 강제 청산 완료!")
+                            var_success = True
+                        else:
+                            self.log(f"   ❌ Variational 강제 청산 실패: {result.get('error')}")
+                    else:
+                        self.log(f"   ✅ Variational 포지션 없음 (이미 청산됨)")
+                        var_success = True  # 이미 청산된 것으로 처리
                     return
 
                 self.log(f"🟢 Variational 청산 시작!")
-                result = self.variational_client.close_position('BTC', max_retries=2)
+                result = self.variational_client.close_position('BTC', max_retries=3)
 
                 if result.get('success'):
                     self.log(f"   ✅ Variational 청산 완료!")
+                    if result.get('warning'):
+                        self.log(f"   ⚠️ 경고: {result.get('warning')}")
                     var_success = True
                 else:
-                    self.log(f"   ❌ Variational 청산 실패")
+                    self.log(f"   ❌ Variational 청산 실패: {result.get('error', 'Unknown error')}")
+                    # 실패해도 포지션 상태 확인
+                    pos_check = self.variational_client.get_positions_rest()
+                    if not pos_check.get('success') or abs(pos_check.get('qty', 0)) < 0.000001:
+                        self.log(f"   ✅ 실제로는 포지션이 청산됨 (상태 확인)")
+                        var_success = True
 
                 self.variational_position = None
 

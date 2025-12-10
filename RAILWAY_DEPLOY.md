@@ -22,28 +22,45 @@ git push origin main
 
 ## 🚀 Railway 배포
 
-### 1. Railway 계정 생성 및 프로젝트 생성
+### 0. 설정 서버 배포 (먼저 진행)
 
-1. [Railway](https://railway.app)에 가입/로그인
+**설정 서버를 먼저 배포해야 합니다!**
+
+1. Railway에서 새 프로젝트 생성
+2. GitHub 저장소 연결
+3. 환경 변수 설정:
+   ```
+   SERVER_TOKEN=your-secret-token-here
+   ```
+4. 배포 완료 후 URL 확인 (예: `https://config-server.up.railway.app`)
+5. 자세한 내용은 `CONFIG_SERVER_DEPLOY.md` 참고
+
+### 1. 봇 Railway 배포
+
+1. Railway에서 **새 프로젝트** 생성 (설정 서버와 별도)
 2. "New Project" 클릭
 3. "Deploy from GitHub repo" 선택
-4. 저장소 선택
+4. **같은 저장소** 선택
 
 ### 2. 환경 변수 설정
 
 Railway 대시보드에서 "Variables" 탭으로 이동하여 다음 환경 변수들을 추가합니다:
 
+**중요:** `CONFIG_SERVER_URL`은 설정 서버의 Railway URL입니다!
+
 #### 필수 환경 변수
 
 ```
-CONFIG_SERVER_URL=https://your-config-server.com
-CONFIG_SERVER_TOKEN=your-config-token
+CONFIG_SERVER_URL=https://your-config-server.up.railway.app
+CONFIG_SERVER_TOKEN=your-secret-token-here  (설정 서버의 SERVER_TOKEN과 동일!)
 OSTIUM_PRIVATE_KEY=0x...
 VARIATIONAL_WALLET_ADDRESS=0x...
 VARIATIONAL_PRIVATE_KEY=0x...
 OSTIUM_RPC_URL=https://your-rpc-url
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 ```
+
+**중요:** `CONFIG_SERVER_TOKEN`은 설정 서버의 `SERVER_TOKEN`과 **반드시 일치**해야 합니다!
 
 #### 선택적 환경 변수
 
@@ -78,15 +95,28 @@ Railway는 자동으로 다음 파일들을 인식합니다:
 - `/positions` - 현재 포지션 확인
 - `/close_all` - 모든 포지션 청산
 - `/stats` - 거래 통계 확인
+- `/cancel` - 설정 입력 취소
 
-### 설정 변경
+### 설정 변경 방법
 
 1. `/settings` 명령어 입력
-2. 변경할 항목 선택:
-   - 진입 갭: 차익거래 진입 조건 ($)
-   - 목표 이익: 청산 목표 수익 ($)
-   - 레버리지: 포지션 레버리지 (배)
-   - 포지션 크기: 콜래터럴 금액 (USDC)
+2. 변경할 항목 버튼 클릭:
+   - **진입 갭 변경**: 차익거래 진입 조건 ($)
+   - **목표 이익 변경**: 청산 목표 수익 ($)
+   - **레버리지 변경**: 포지션 레버리지 (1~10배)
+   - **포지션 크기 변경**: 콜래터럴 금액 (USDC)
+3. 봇이 입력을 요청하면 숫자로 값 입력
+   - 예: `25` 또는 `25.5`
+4. 설정이 즉시 적용됩니다!
+
+### 설정 예시
+
+```
+진입 갭: $20 (갭이 $20 이상일 때 진입)
+목표 이익: $15 (이익이 $15 이상이면 청산)
+레버리지: 3x (3배 레버리지)
+포지션 크기: $300 (콜래터럴 $300)
+```
 
 ## 🔍 문제 해결
 
