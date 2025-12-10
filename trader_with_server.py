@@ -1,6 +1,18 @@
 # arbitrage_bot_v3.py
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+# tkinter는 GUI 버전에서만 필요 (서버 환경에서는 선택적)
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox, scrolledtext
+    HAS_TKINTER = True
+except ImportError:
+    # 서버 환경에서는 tkinter가 없을 수 있음 (텔레그램 봇 등)
+    HAS_TKINTER = False
+    # 더미 객체 생성 (GUI 클래스는 사용되지 않음)
+    tk = None
+    ttk = None
+    messagebox = None
+    scrolledtext = None
+
 from curl_cffi import requests
 import json
 import threading
@@ -941,6 +953,9 @@ class VariationalClient:
 
 class ArbitrageGUI:
     def __init__(self, root):
+        if not HAS_TKINTER:
+            raise RuntimeError("tkinter is required for GUI mode. Use telegram bot for server deployment.")
+        
         self.root = root
         self.root.title("🤖 Ostium ↔️ Variational 차익거래 봇 V3.1 (핑퐁)")
         self.root.geometry("1200x900")
