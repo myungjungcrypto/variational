@@ -1,2 +1,2 @@
-worker: python trader_telegram_bot.py
+web: python trader_telegram_bot.py
 

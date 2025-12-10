@@ -100,6 +100,12 @@ desktop.ini
 # ========================================
 # 프로젝트별
 # ========================================
+# 설정 서버 (별도 저장소로 분리됨)
+config_server.py
+Procfile.server
+railway.server.json
+CONFIG_SERVER_DEPLOY.md
+
 # 설정 서버 데이터
 server_data/
 config_cache/
